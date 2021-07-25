@@ -23,6 +23,7 @@ class Highway(nn.Module):
         )
         
     def forward(self, x):
+        print(x.shape)
         for i in range(self.n_layers):
             gate = torch.sigmoid(self.gate[i](x))
             non_linear_out = torch.relu(self.non_linear[i](x))
@@ -36,11 +37,11 @@ class Encoder(nn.Module):
     
     def __init__(
         self, n_highway_layers, embedding_dim, encoder_hidden_dim, 
-        encoder_num_layers, z_dim,
+        encoder_num_layers, z_dim, vocab_size,
     ):
         super(Encoder, self).__init__()
         self.embedding = nn.Embedding(
-            num_embeddings=100,
+            num_embeddings=vocab_size,
             embedding_dim=embedding_dim,
         )
         
@@ -59,23 +60,31 @@ class Encoder(nn.Module):
         self.z2log_var = nn.Linear(2 * encoder_hidden_dim, z_dim)
         self.fc_out = nn.Linear(2 * encoder_hidden_dim, 2 * encoder_hidden_dim)
 
-    def sample(self, hn):
-        noise = torch.rand_like(hn)
+        self.relu = nn.ReLU()
         
+    def sample(self, hn):
         # re-parameterize
         mean = self.z2mean(hn)
         log_var = self.z2log_var(hn)
         
+        noise = torch.rand_like(mean)
+        print("in sample")
+        print(hn.shape)
+        print(mean.shape)
+        print(log_var.shape)
+        
         z = mean + noise * torch.exp(0.5 * log_var)
-
+        print(z.shape)
         return mean, log_var, z
 
     def forward(self, x, valid_length):
         bs, *_ = x.shape
+        x = self.embedding(x)
+        
         x = self.highway(x)
         
         packed_sequence = pack_padded_sequence(
-            x, length=valid_length, batch_first=True, enforce_sorted=False,
+            x, lengths=valid_length, batch_first=True, enforce_sorted=False,
         )
 
         _, (hn, _) = self.lstm(packed_sequence)
@@ -88,7 +97,7 @@ class Encoder(nn.Module):
         # concat hidden of both directions
         hn = hn.permute(1, 0, 2).contiguous().view(bs, -1)  # bs, hidden * 2
         
-        hn = nn.ReLU(self.fc_out(hn))
+        hn = self.relu(self.fc_out(hn))
 
         z, mean, log_var = self.sample(hn)
         
@@ -127,44 +136,94 @@ class Generator(nn.Module):
         self.fc_after_rnn = nn.Linear(decoder_hidden_dim + z_dim, vocab_size)
 
     def forward(self, latent_z):
-
-        input_ = None  # <SOS>
+        print("in decoder forward")
+        input_ = torch.randint(size=(2, 1), low=0, high=10)  # <SOS>
+        print(input_.shape)
         hidden = None
         
         decoding_result = []
         
         outputs = []
         
-        for _ in range(self.max_decode_len):
-            out, hidden = self.step(hidden, latent_z, input_)
+        for idx in range(self.max_decode_len):
+            out, hidden = self.step(idx, hidden, latent_z, input_)      
+            _, indices = torch.max(out, -1)
+            print(f"indices:{indices}")
+            
+            decoding_result.append(indices)
             outputs.append(out)
             
-            max_val, indices = torch.max(out)
-            decoding_result.append(indices)
+            input_ = indices
+        print(f"decoding_result:{[i.shape for i in decoding_result]}")
+        print(f"outputs:{[i.shape for i in outputs]}")
+        indices = torch.cat(decoding_result, dim=-1)
+        outputs = torch.cat(outputs, dim=1)  # differentiable
         
-        indices = torch.cat(decoding_result, dim=0)
-        outputs = torch.cat(outputs, dim=-1)  # differentiable
-        
+        print(f"generate_output:{indices}")
         print("generate indices:{}".format(indices.shape))
         print("output: {}".format(outputs.shape))
         
-        return indices
+        return outputs, indices
         
-    def step(self, hidden, latent_z, input_):
+    def step(self, step_idx, hidden, latent_z, input_):
+        print(f"in decoder step {step_idx}")
         input_ = self.embedding(input_)
+        print(input_.shape)
+        print(latent_z.shape)
+        out, hidden = self.lstm(
+            torch.cat([latent_z.unsqueeze(1), input_], dim=-1), 
+            hidden,
+        )
+        print(out.shape)
+        print([i.shape for i in hidden]) 
+        print(latent_z.unsqueeze(1).shape)
         
-        out, hidden = self.lstm(torch.cat([latent_z, input_]), hidden)
-        out = torch.cat([latent_z, out])  # cat out and latent_z
-        out = self.fc_after_rnn(out)  # linear transform
-        
+        # cat latent_z & out
+        out = torch.cat([latent_z.unsqueeze(1), out], dim=-1)
+        out = self.fc_after_rnn(out)  # linear transform TODO: why linear?
+        print(out.shape)
+        print("--out--")
         return out, hidden
     
 
 class VAE(nn.Module):
     
-    def __init__(self):
+    def __init__(
+        self, 
+        n_highway_layers, 
+        embedding_dim, 
+        encoder_hidden_dim, 
+        encoder_num_layers, 
+        z_dim,
+        decoder_hidden_dim, 
+        decoder_num_layers, 
+        vocab_size, 
+        max_decode_len,
+    ):
         super(VAE, self).__init__()
+        
+        self.encoder = Encoder(
+            n_highway_layers, 
+            embedding_dim, 
+            encoder_hidden_dim, 
+            encoder_num_layers, 
+            z_dim,
+            vocab_size,
+        )
+        
+        self.decoder = Generator(
+            embedding_dim, 
+            encoder_hidden_dim, 
+            decoder_hidden_dim, 
+            decoder_num_layers, 
+            vocab_size, 
+            z_dim, 
+            max_decode_len,
+        )
     
-    def forward(self):
-        pass
-    
+    def forward(self, x, valid_length):
+        z, mean, log_var = self.encoder(x, valid_length)
+        
+        outputs, indices = self.decoder(z)
+        
+        return outputs, indices, mean, log_var
