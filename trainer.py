@@ -43,7 +43,7 @@ class Trainer(BaseTrainer):
         return self.model(x, valid_length, on_train)
     
     def do_sample(self):
-        print("Do sampling...")
+        print("==Do sampling now==")
         for text in self.sampling_text_list:
             target_indices, valid_length = translate_text(
                 text, self.vocab, Config.max_src_length, word_tokenize,
@@ -57,10 +57,19 @@ class Trainer(BaseTrainer):
             
             output_text = translate_idx(gen_indices, self.vocab)
             
-            print("==sampling now==\nraw text: {}\n gen text: {}".format(
+            print("raw text: {}\n gen text: {}".format(
                 text, output_text
             ))
 
+    def do_random_sample(self, n_samples=3):
+        print("==Do random sampling now==")
+        for _ in range(n_samples):
+            z = torch.randn(1, Config.z_dim)
+            _, indices = self.model.decoder(z)
+            output_text = translate_idx(indices, self.vocab)
+            
+            print("\ngen text: {}".format(output_text))
+            
     def calc_loss(self, mean, log_var, target, output):
         re_construct_loss = self.ce_loss(output.permute(0, 2, 1), target)
         
@@ -138,6 +147,7 @@ class Trainer(BaseTrainer):
         if phase is Phase.TRAIN:
             self.lr_scheduler.step()  # step every train epoch
             self.do_sample()
+            self.do_random_sample()
             
         avg_loss = sum(total_loss) / len(total_loss)
         avg_valid_loss = sum(valid_loss) / len(valid_loss)
