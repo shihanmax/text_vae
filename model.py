@@ -207,6 +207,7 @@ class VAE(nn.Module):
         )
     
     def forward(self, x, valid_length, on_train):
+        valid_length = valid_length.to("cpu")
         z, mean, log_var = self.encoder(x, valid_length, on_train)
         outputs, indices = self.decoder(z)
 
