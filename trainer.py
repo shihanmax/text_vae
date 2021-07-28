@@ -48,7 +48,9 @@ class Trainer(BaseTrainer):
             target_indices, valid_length = translate_text(
                 text, self.vocab, Config.max_src_length, word_tokenize,
             )
-            target_indices = torch.tensor(target_indices).unsqueeze(0)
+            target_indices = torch.tensor(target_indices).unsqueeze(0).to(
+                Config.device
+            )
             valid_length = torch.tensor(valid_length).unsqueeze(0)
             
             _, gen_indices, _, _ = self.forward_model(
@@ -64,7 +66,7 @@ class Trainer(BaseTrainer):
     def do_random_sample(self, n_samples=3):
         print("==Do random sampling now==")
         for _ in range(n_samples):
-            z = torch.randn(1, Config.z_dim)
+            z = torch.randn(1, Config.z_dim).to(Config.device)
             _, indices = self.model.decoder(z)
             output_text = translate_idx(indices, self.vocab)
             

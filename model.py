@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
+from .config import Config
 
 
 class Highway(nn.Module):
@@ -69,7 +70,7 @@ class Encoder(nn.Module):
         if not on_train:
             noise = 1
         else:
-            noise = torch.rand_like(mean)
+            noise = torch.rand_like(mean).to(Config.device)
         
         z = mean + noise * torch.exp(0.5 * log_var)
 
@@ -136,6 +137,7 @@ class Generator(nn.Module):
     def forward(self, latent_z):
         bs = latent_z.shape[0]
         input_ = torch.ones(size=(bs, 1), dtype=torch.long) * 2
+        input_ = input_.to(Config.device)
         hidden = None
         
         decoding_result = []
